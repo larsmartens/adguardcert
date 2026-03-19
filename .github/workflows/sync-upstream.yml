@@ -1,0 +1,65 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: "10 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  workflows: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/AdguardTeam/adguardcert.git || true
+
+      - name: Fetch upstream
+        run: git fetch upstream master --tags
+
+      - name: Check for upstream commits
+        id: check
+        run: |
+          BEHIND=$(git rev-list HEAD..upstream/master --count)
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          echo "Upstream is $BEHIND commit(s) ahead"
+
+      - name: Merge upstream
+        if: steps.check.outputs.behind != '0'
+        run: |
+          git merge upstream/master --no-edit -X ours || {
+            git checkout --ours .
+            git add -A
+            git commit --no-edit
+          }
+
+      - name: Push synced branch
+        if: steps.check.outputs.behind != '0'
+        run: git push origin master
+
+      - name: Build module zip
+        if: steps.check.outputs.behind != '0' || github.event_name == 'workflow_dispatch'
+        run: ./dist.sh
+
+      - name: Upload build artifact
+        if: steps.check.outputs.behind != '0' || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: adguardcert-sync-build
+          path: adguardcert-*.zip
