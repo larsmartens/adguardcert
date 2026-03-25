@@ -47,7 +47,19 @@ jobs:
         if: steps.check.outputs.behind != '0'
         run: |
           git merge upstream/master --no-edit -X ours || {
-            git checkout --ours .
+            git diff --name-only --diff-filter=U > conflicts.txt
+            while IFS= read -r path; do
+              [ -n "$path" ] || continue
+              case "$path" in
+                .github/workflows/*)
+                  git restore --source="${{ steps.base.outputs.sha }}" --staged --worktree -- "$path" 2>/dev/null || git rm -f -- "$path"
+                  ;;
+                *)
+                  git checkout --ours -- "$path" 2>/dev/null || git rm -f -- "$path"
+                  ;;
+              esac
+            done < conflicts.txt
+            rm -f conflicts.txt
             git add -A
             git commit --no-edit
           }
