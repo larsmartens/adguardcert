@@ -14,8 +14,8 @@ case version in
 {
   "version": "$version",
   "versionCode": $versionCode,
-  "zipUrl": "https://github.com/AdguardTeam/adguardcert/releases/download/$version/adguardcert-$version.zip",
-  "changelog": "https://github.com/AdguardTeam/adguardcert/releases/tag/$version"
+  "zipUrl": "https://github.com/larsmartens/adguardcert/releases/download/$version/adguardcert-$version.zip",
+  "changelog": "https://github.com/larsmartens/adguardcert/releases/tag/$version"
 }
 EOF
     )
