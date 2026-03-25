@@ -5,6 +5,7 @@ case version in
     ;;
 *)
     git checkout -B master origin/master
+    ./generate_changelog.sh
     cat module/module.prop | (
     IFS="="
     while read k v; do
@@ -15,11 +16,11 @@ case version in
   "version": "$version",
   "versionCode": $versionCode,
   "zipUrl": "https://github.com/larsmartens/adguardcert/releases/download/$version/adguardcert-$version.zip",
-  "changelog": "https://github.com/larsmartens/adguardcert/releases/tag/$version"
+  "changelog": "https://raw.githubusercontent.com/larsmartens/adguardcert/master/changelog.md"
 }
 EOF
     )
-    git add update.json
+    git add update.json changelog.md
     git commit -m "skipci: Update update.json" || true
     ;;
 esac
