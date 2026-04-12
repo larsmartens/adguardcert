@@ -77,13 +77,54 @@ jobs:
         if: steps.check.outputs.behind != '0'
         run: git push origin master
 
+      - name: Compute fork build version
+        if: steps.check.outputs.behind != '0'
+        id: version
+        run: |
+          RAW_VERSION=$(sed -ne 's/^version=//p' module/module.prop)
+          BASE_VERSION=${RAW_VERSION%%-fork.*}
+          BUILD_COUNT=$(git rev-list --count HEAD)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          VERSION="${BASE_VERSION}-fork.${BUILD_COUNT}.${SHORT_SHA}"
+          VERSION_CODE=$((BUILD_COUNT + 1000))
+          sed -i "s/^version=.*/version=${VERSION}/" module/module.prop
+          sed -i "s/^versionCode=.*/versionCode=${VERSION_CODE}/" module/module.prop
+          cat > update.json <<EOF
+          {
+            "version": "${VERSION}",
+            "versionCode": ${VERSION_CODE},
+            "zipUrl": "https://github.com/larsmartens/adguardcert/releases/download/${VERSION}/adguardcert-${VERSION}.zip",
+            "changelog": "https://raw.githubusercontent.com/larsmartens/adguardcert/master/changelog.md"
+          }
+          EOF
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit fork build metadata
+        if: steps.check.outputs.behind != '0'
+        run: |
+          git add module/module.prop update.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: prepare fork module metadata"
+            git push origin master
+          fi
+
       - name: Build module zip
-        if: steps.check.outputs.behind != '0' || github.event_name == 'workflow_dispatch'
+        if: steps.check.outputs.behind != '0'
         run: ./dist.sh
 
       - name: Upload build artifact
-        if: steps.check.outputs.behind != '0' || github.event_name == 'workflow_dispatch'
+        if: steps.check.outputs.behind != '0'
         uses: actions/upload-artifact@v4
         with:
           name: adguardcert-sync-build
           path: adguardcert-*.zip
+
+      - name: Create release
+        if: steps.check.outputs.behind != '0'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: AdGuard Certificate ${{ steps.version.outputs.version }}
+          prerelease: true
+          make_latest: true
+          files: adguardcert-*.zip
