@@ -31,8 +31,8 @@ chmod +x "$CLI"
 
 export MODDIR
 export CALLS
-export ADGUARDCERT_STATE_DIR=$STATE
-export HYBRID_MOUNT_CLI=$CLI
+export ADGUARDCERT_STATE_DIR="$STATE"
+export HYBRID_MOUNT_CLI="$CLI"
 
 . ./module/common.sh
 

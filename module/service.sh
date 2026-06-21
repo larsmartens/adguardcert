@@ -13,6 +13,10 @@ if ! verify_visibility; then
     mount_targets_other_namespaces
 fi
 
-verify_visibility && status_write "ready" "verified" || status_write "degraded" "late-verify-failed"
+if verify_visibility; then
+    status_write "ready" "verified"
+else
+    status_write "degraded" "late-verify-failed"
+fi
 
 exit 0

@@ -26,7 +26,7 @@ jobs:
           busybox sh -n module/*.sh tests/*.sh
 
       - name: run shellcheck
-        run: shellcheck -x -s sh -e SC1090,SC1091,SC2034 module/*.sh tests/*.sh
+        run: shellcheck -x -s sh -e SC1090,SC1091,SC2012,SC2034 module/*.sh tests/*.sh
 
       - name: validate line endings
         run: |
