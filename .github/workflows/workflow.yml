@@ -15,6 +15,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y busybox-static shellcheck
+
+      - name: validate shell syntax
+        run: |
+          sh -n module/*.sh tests/*.sh
+          busybox sh -n module/*.sh tests/*.sh
+
+      - name: run shellcheck
+        run: shellcheck -x -s sh -e SC1090,SC1091,SC2034 module/*.sh tests/*.sh
+
+      - name: validate line endings
+        run: |
+          bad=$(git grep -Il $'\r' -- . || true)
+          if [ -n "$bad" ]; then
+            echo "$bad"
+            exit 1
+          fi
+
+      - name: run mocked module tests
+        run: |
+          sh tests/test_staging.sh
+          sh tests/test_hybrid_registration.sh
+
       - name: build dist
         run: |
           ./dist.sh
