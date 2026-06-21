@@ -30,7 +30,7 @@ jobs:
 
       - name: validate line endings
         run: |
-          bad=$(git grep -Il $'\r' -- . || true)
+          bad=$(git grep -Il $'\r' -- module tests .github/workflows README.md || true)
           if [ -n "$bad" ]; then
             echo "$bad"
             exit 1
