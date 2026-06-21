@@ -1,28 +1,66 @@
 #!/system/bin/sh
 
 MODDIR=${MODDIR:-${0%/*}}
+MODULE_ID=${ADGUARDCERT_MODULE_ID:-adguardcert}
 
 STATE_DIR=${ADGUARDCERT_STATE_DIR:-/data/adb/adguardcert}
 CONFIG_FILE=$STATE_DIR/config.sh
 STATUS_FILE=$STATE_DIR/status
 CACHE_FILE=$STATE_DIR/cache
+HYBRID_STATUS_FILE=$STATE_DIR/hybrid.status
 RUN_CERT_DIR=$STATE_DIR/cacerts
 
-SYSTEM_CERT_DIR=/system/etc/security/cacerts
-APEX_CERT_DIR=/apex/com.android.conscrypt/cacerts
+DATA_MISC_USER_DIR=${ADGUARDCERT_DATA_MISC_USER_DIR:-/data/misc/user}
+SYSTEM_CERT_DIR=${ADGUARDCERT_SYSTEM_CERT_DIR:-/system/etc/security/cacerts}
+APEX_ROOT_DIR=${ADGUARDCERT_APEX_ROOT_DIR:-/apex}
+APEX_CERT_DIR=${ADGUARDCERT_APEX_CERT_DIR:-$APEX_ROOT_DIR/com.android.conscrypt/cacerts}
 MODULE_SYSTEM_CERT_DIR=$MODDIR/system/etc/security/cacerts
 MODULE_APEX_CERT_DIR=$MODDIR/apex/com.android.conscrypt/cacerts
 
 PERSONAL_HASHES=${PERSONAL_HASHES:-"0f4ed297 14944648"}
 INTERMEDIATE_HASHES=${INTERMEDIATE_HASHES:-"47ec1af8"}
 MIN_CERT_COUNT=${MIN_CERT_COUNT:-10}
+HYBRID_MOUNT_CLI=${HYBRID_MOUNT_CLI:-}
 
 [ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
 
 SELECTED_CERT=
 SELECTED_HASH=
 SELECTED_SIG=
+SELECTED_USER=
+SELECTED_MTIME=
+SELECTED_SUBJECT=
+SELECTED_ISSUER=
+SELECTION_REASON=
+CANDIDATE_COUNT=0
 BASE_SIG=
+
+bb_path() {
+    for bin in /data/adb/ksu/bin/busybox /data/adb/magisk/busybox /data/adb/ap/bin/busybox; do
+        [ -x "$bin" ] && {
+            echo "$bin"
+            return 0
+        }
+    done
+    command -v busybox 2>/dev/null
+}
+
+bb() {
+    bin=$(bb_path)
+    if [ -n "$bin" ]; then
+        "$bin" "$@"
+        return $?
+    fi
+    "$@"
+}
+
+cmd_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+get_sdk() {
+    getprop ro.build.version.sdk 2>/dev/null || echo unknown
+}
 
 status_write() {
     mkdir -p "$STATE_DIR" 2>/dev/null
@@ -31,9 +69,20 @@ status_write() {
         echo "detail=$2"
         echo "cert=$SELECTED_CERT"
         echo "hash=$SELECTED_HASH"
-        echo "sdk=$(getprop ro.build.version.sdk 2>/dev/null)"
+        echo "sha256=$SELECTED_SIG"
+        echo "user=$SELECTED_USER"
+        echo "sdk=$(get_sdk)"
         echo "time=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)"
     } > "$STATUS_FILE"
+}
+
+hybrid_status_write() {
+    mkdir -p "$STATE_DIR" 2>/dev/null
+    {
+        echo "status=$1"
+        echo "detail=$2"
+        echo "time=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)"
+    } > "$HYBRID_STATUS_FILE"
 }
 
 list_has() {
@@ -57,20 +106,75 @@ cert_index_from_path() {
     esac
 }
 
+cert_user_from_path() {
+    cert_path=$1
+    rel=${cert_path#"$DATA_MISC_USER_DIR"/}
+    echo "${rel%%/*}"
+}
+
+cert_file_has() {
+    grep -aq "$2" "$1" 2>/dev/null
+}
+
+cert_openssl_info() {
+    cert=$1
+    cmd_exists openssl || return 1
+    openssl x509 -inform DER -in "$cert" -noout -subject -issuer 2>/dev/null && return 0
+    openssl x509 -inform PEM -in "$cert" -noout -subject -issuer 2>/dev/null
+}
+
+cert_field() {
+    cert_openssl_info "$1" | sed -n "s/^$2=//p" | head -n 1
+}
+
+cert_subject() {
+    cert_field "$1" subject
+}
+
+cert_issuer() {
+    cert_field "$1" issuer
+}
+
+cert_probe_text() {
+    cert_openssl_info "$1" 2>/dev/null
+    cert_file_has "$1" "AdGuard" && echo "AdGuard"
+    cert_file_has "$1" "Personal" && echo "Personal"
+    cert_file_has "$1" "Intermediate" && echo "Intermediate"
+    cert_file_has "$1" "CA" && echo "CA"
+}
+
+cert_mentions_adguard() {
+    cert_probe_text "$1" | grep -qi "AdGuard"
+}
+
+cert_mentions_intermediate() {
+    subject=$(cert_subject "$1")
+    echo "$subject" | grep -qi "Intermediate" && return 0
+    cert_file_has "$1" "AdGuard Personal Intermediate" && return 0
+    cert_file_has "$1" "Personal Intermediate" && cert_file_has "$1" "AdGuard" && return 0
+    return 1
+}
+
 cert_is_intermediate() {
     cert_hash=$(cert_hash_from_path "$1")
-    list_has "$INTERMEDIATE_HASHES" "$cert_hash" && grep -aq "AdGuard" "$1" 2>/dev/null && return 0
-    grep -aq "AdGuard Personal Intermediate" "$1" 2>/dev/null && return 0
-    grep -aq "Personal Intermediate" "$1" 2>/dev/null && grep -aq "AdGuard" "$1" 2>/dev/null && return 0
+    list_has "$INTERMEDIATE_HASHES" "$cert_hash" && cert_mentions_adguard "$1" && return 0
+    cert_mentions_adguard "$1" && cert_mentions_intermediate "$1" && return 0
     return 1
 }
 
 cert_is_personal() {
     cert_hash=$(cert_hash_from_path "$1")
     cert_is_intermediate "$1" && return 1
-    list_has "$PERSONAL_HASHES" "$cert_hash" && grep -aq "AdGuard" "$1" 2>/dev/null && return 0
-    grep -aq "AdGuard Personal CA" "$1" 2>/dev/null && return 0
-    return 1
+    list_has "$PERSONAL_HASHES" "$cert_hash" && cert_mentions_adguard "$1" && return 0
+    probe=$(cert_probe_text "$1")
+    echo "$probe" | grep -qi "AdGuard" || return 1
+    echo "$probe" | grep -qi "Personal" || return 1
+    echo "$probe" | grep -qi "CA" || return 1
+    return 0
+}
+
+sha256_file() {
+    bb sha256sum "$1" 2>/dev/null | awk '{print $1}'
 }
 
 count_files() {
@@ -83,38 +187,64 @@ count_files() {
 }
 
 dir_signature() {
-    if [ -d "$1" ]; then
-        ls -ln "$1" 2>/dev/null | sha256sum 2>/dev/null | awk '{print $1}'
-    fi
+    [ -d "$1" ] || return 1
+    {
+        for file in "$1"/*; do
+            [ -f "$file" ] || continue
+            sig=$(sha256_file "$file")
+            [ -n "$sig" ] && echo "$sig  ${file##*/}"
+        done
+    } | bb sort 2>/dev/null | bb sha256sum 2>/dev/null | awk '{print $1}'
+}
+
+stat_mtime() {
+    mtime=$(bb stat -c '%Y' "$1" 2>/dev/null)
+    case "$mtime" in
+        ""|*[!0-9]*) echo 0 ;;
+        *) echo "$mtime" ;;
+    esac
 }
 
 find_adguard_cert() {
     SELECTED_CERT=
     SELECTED_HASH=
-    best_mtime=-1
-    best_index=-1
+    SELECTED_SIG=
+    SELECTED_USER=
+    SELECTED_MTIME=
+    SELECTED_SUBJECT=
+    SELECTED_ISSUER=
+    SELECTION_REASON=
+    CANDIDATE_COUNT=0
+    best_mtime=0
+    best_index=0
 
-    for cert in /data/misc/user/*/cacerts-added/*; do
+    for cert in "$DATA_MISC_USER_DIR"/*/cacerts-added/*; do
         [ -f "$cert" ] || continue
         cert_is_personal "$cert" || continue
 
-        cert_mtime=$(stat -c '%Y' "$cert" 2>/dev/null)
-        case "$cert_mtime" in
-            ""|*[!0-9]*) cert_mtime=0 ;;
-        esac
+        CANDIDATE_COUNT=$((CANDIDATE_COUNT + 1))
+        cert_mtime=$(stat_mtime "$cert")
         cert_index=$(cert_index_from_path "$cert")
 
-        if [ "$cert_mtime" -gt "$best_mtime" ] || {
+        if [ -z "$SELECTED_CERT" ] || [ "$cert_mtime" -gt "$best_mtime" ] || {
             [ "$cert_mtime" -eq "$best_mtime" ] && [ "$cert_index" -gt "$best_index" ]
         }; then
             SELECTED_CERT=$cert
             SELECTED_HASH=$(cert_hash_from_path "$cert")
+            SELECTED_USER=$(cert_user_from_path "$cert")
+            SELECTED_MTIME=$cert_mtime
             best_mtime=$cert_mtime
             best_index=$cert_index
         fi
     done
 
-    [ -n "$SELECTED_CERT" ]
+    [ -n "$SELECTED_CERT" ] || return 1
+    SELECTED_SIG=$(sha256_file "$SELECTED_CERT")
+    [ -n "$SELECTED_SIG" ] || SELECTED_SIG=unknown
+    SELECTED_SUBJECT=$(cert_subject "$SELECTED_CERT")
+    SELECTED_ISSUER=$(cert_issuer "$SELECTED_CERT")
+    SELECTION_REASON=newest-mtime-highest-index
+    return 0
 }
 
 copy_cert_files() {
@@ -207,25 +337,27 @@ prepare_trust_store() {
         return 1
     fi
 
-    SELECTED_SIG=$(sha256sum "$SELECTED_CERT" 2>/dev/null | awk '{print $1}')
-    [ -n "$SELECTED_SIG" ] || SELECTED_SIG=unknown
-
     if [ -d "$APEX_CERT_DIR" ] && [ "$(count_files "$APEX_CERT_DIR")" -gt "$MIN_CERT_COUNT" ]; then
         primary_source=$APEX_CERT_DIR
     else
         primary_source=$SYSTEM_CERT_DIR
     fi
 
-    BASE_SIG=$(dir_signature "$primary_source")
-    cache_sig="$SELECTED_HASH:$SELECTED_SIG:$primary_source:$BASE_SIG"
+    system_source=$SYSTEM_CERT_DIR
+    [ -d "$system_source" ] && [ "$(count_files "$system_source")" -gt "$MIN_CERT_COUNT" ] || system_source=$primary_source
+
+    system_sig=$(dir_signature "$system_source")
+    apex_sig=
+    if [ -d "$APEX_CERT_DIR" ]; then
+        apex_sig=$(dir_signature "$APEX_CERT_DIR")
+    fi
+    BASE_SIG="$system_source:$system_sig|$APEX_CERT_DIR:$apex_sig"
+    cache_sig="$SELECTED_HASH:$SELECTED_SIG:$BASE_SIG"
 
     if [ -f "$CACHE_FILE" ] && [ "$(cat "$CACHE_FILE" 2>/dev/null)" = "$cache_sig" ] && mirrors_ready; then
         status_write "ready" "cached"
         return 0
     fi
-
-    system_source=$SYSTEM_CERT_DIR
-    [ -d "$system_source" ] && [ "$(count_files "$system_source")" -gt "$MIN_CERT_COUNT" ] || system_source=$primary_source
 
     build_cert_dir "$system_source" "$MODULE_SYSTEM_CERT_DIR" || {
         status_write "failed" "system-store-stage-failed"
@@ -248,18 +380,93 @@ prepare_trust_store() {
         }
     fi
 
-    rm -f /data/misc/user/*/cacerts-removed/"$SELECTED_HASH".* 2>/dev/null
+    rm -f "$DATA_MISC_USER_DIR"/*/cacerts-removed/"$SELECTED_HASH".* 2>/dev/null
     echo "$cache_sig" > "$CACHE_FILE"
     status_write "ready" "staged"
     return 0
 }
 
-hybrid_mount_available() {
-    for cli in /data/adb/metamodule/hybrid-mount /data/adb/modules/hybrid_mount/hybrid-mount /data/adb/modules/meta-hybrid_mount/hybrid-mount; do
+ensure_hybrid_magic_marker() {
+    [ -d "$MODDIR" ] || return 1
+    [ -e "$MODDIR/magic" ] || [ -e "$MODDIR/overlay" ] || : > "$MODDIR/magic" 2>/dev/null || return 1
+    return 0
+}
+
+hybrid_mount_module_present() {
+    [ -d /data/adb/modules/hybrid_mount ] && return 0
+    [ -d /data/adb/modules/meta-hybrid_mount ] && return 0
+    [ -d /data/adb/modules_update/hybrid_mount ] && return 0
+    [ -d /data/adb/modules_update/meta-hybrid_mount ] && return 0
+    [ -d /data/adb/metamodule ] && return 0
+    return 1
+}
+
+hybrid_mount_cli() {
+    [ -n "$HYBRID_MOUNT_CLI" ] && [ -x "$HYBRID_MOUNT_CLI" ] && {
+        "$HYBRID_MOUNT_CLI" api version >/dev/null 2>&1 && {
+            echo "$HYBRID_MOUNT_CLI"
+            return 0
+        }
+    }
+
+    for cli in \
+        /data/adb/metamodule/hybrid-mount \
+        /data/adb/modules/hybrid_mount/hybrid-mount \
+        /data/adb/modules/meta-hybrid_mount/hybrid-mount \
+        /data/adb/modules_update/hybrid_mount/hybrid-mount \
+        /data/adb/modules_update/meta-hybrid_mount/hybrid-mount
+    do
         [ -x "$cli" ] || [ -f "$cli" ] || continue
-        "$cli" api version >/dev/null 2>&1 && return 0
+        "$cli" api version >/dev/null 2>&1 || continue
+        echo "$cli"
+        return 0
     done
-    command -v hybrid-mount >/dev/null 2>&1 && hybrid-mount api version >/dev/null 2>&1
+
+    if command -v hybrid-mount >/dev/null 2>&1 && hybrid-mount api version >/dev/null 2>&1; then
+        command -v hybrid-mount
+        return 0
+    fi
+
+    return 1
+}
+
+hybrid_mount_available() {
+    hybrid_mount_cli >/dev/null 2>&1 && return 0
+    hybrid_mount_module_present
+}
+
+hybrid_mount_patch() {
+    printf '%s\n' '{"rules":{"adguardcert":{"default_mode":"magic","paths":{"system/etc/security/cacerts":"magic","apex/com.android.conscrypt/cacerts":"magic"}}}}'
+}
+
+hybrid_mount_register() {
+    ensure_hybrid_magic_marker >/dev/null 2>&1 || true
+
+    cli=$(hybrid_mount_cli 2>/dev/null)
+    if [ -z "$cli" ]; then
+        if hybrid_mount_module_present; then
+            hybrid_status_write "registered" "magic-marker"
+            return 0
+        fi
+        hybrid_status_write "unavailable" "hybrid-mount-not-found"
+        return 1
+    fi
+
+    patch=$(hybrid_mount_patch)
+    if "$cli" api config-patch --patch "$patch" --apply-runtime >/dev/null 2>&1; then
+        "$cli" api modules-apply --modules '["adguardcert"]' >/dev/null 2>&1 || true
+        hybrid_status_write "registered" "api-config-patch"
+        return 0
+    fi
+
+    if "$cli" api config-patch --patch "$patch" >/dev/null 2>&1; then
+        "$cli" api modules-apply --modules '["adguardcert"]' >/dev/null 2>&1 || true
+        hybrid_status_write "registered" "api-config-patch-deferred"
+        return 0
+    fi
+
+    hybrid_status_write "failed" "api-config-patch-failed"
+    return 1
 }
 
 apex_mount_source() {
@@ -276,9 +483,13 @@ bind_mount_dir() {
 
     [ -d "$src" ] || return 1
     [ -d "$dst" ] || return 0
-    mount -o bind "$src" "$dst" 2>/dev/null || return 1
-    mount -o remount,bind,ro "$dst" 2>/dev/null || true
+    bb mount -o bind "$src" "$dst" 2>/dev/null || return 1
+    bb mount -o remount,bind,ro "$dst" 2>/dev/null || true
     return 0
+}
+
+have_nsenter() {
+    bb nsenter --help >/dev/null 2>&1
 }
 
 bind_mount_dir_in_ns() {
@@ -289,26 +500,30 @@ bind_mount_dir_in_ns() {
     [ -d "$src" ] || return 1
     [ -d "$dst" ] || return 0
     [ -r "/proc/$pid/ns/mnt" ] || return 0
-    command -v nsenter >/dev/null 2>&1 || return 0
-    nsenter --mount="/proc/$pid/ns/mnt" -- mount -o bind "$src" "$dst" 2>/dev/null || return 1
-    nsenter --mount="/proc/$pid/ns/mnt" -- mount -o remount,bind,ro "$dst" 2>/dev/null || true
+    have_nsenter || return 0
+    bb nsenter --mount="/proc/$pid/ns/mnt" -- mount -o bind "$src" "$dst" 2>/dev/null || return 1
+    bb nsenter --mount="/proc/$pid/ns/mnt" -- mount -o remount,bind,ro "$dst" 2>/dev/null || true
     return 0
 }
 
 versioned_apex_dirs() {
-    for dir in /apex/com.android.conscrypt@*/cacerts; do
+    for dir in "$APEX_ROOT_DIR"/com.android.conscrypt@*/cacerts; do
         [ -d "$dir" ] || continue
         echo "$dir"
     done
 }
 
+pidof_name() {
+    pidof "$1" 2>/dev/null
+}
+
 target_pids() {
     echo 1
-    pidof zygote 2>/dev/null
-    pidof zygote64 2>/dev/null
-    pidof zygote_next 2>/dev/null
-    pidof webview_zygote 2>/dev/null
-    pidof system_server 2>/dev/null
+    pidof_name zygote
+    pidof_name zygote64
+    pidof_name zygote_next
+    pidof_name webview_zygote
+    pidof_name system_server
 }
 
 mount_targets_current_ns() {
@@ -354,14 +569,87 @@ cert_visible_in_dir() {
     [ -f "$1/$SELECTED_HASH.0" ]
 }
 
-verify_visibility() {
+cert_visible_in_pid_dir() {
+    pid=$1
+    path=$2
+
+    [ -n "$SELECTED_HASH" ] || return 1
+    [ -d "/proc/$pid/root$path" ] || return 2
+    [ -f "/proc/$pid/root$path/$SELECTED_HASH.0" ]
+}
+
+store_visibility_current() {
     if [ -d "$APEX_CERT_DIR" ]; then
-        cert_visible_in_dir "$APEX_CERT_DIR" || return 1
+        cert_visible_in_dir "$APEX_CERT_DIR" || {
+            echo not_visible
+            return 1
+        }
         for apex_dir in $(versioned_apex_dirs); do
-            cert_visible_in_dir "$apex_dir" || return 1
+            cert_visible_in_dir "$apex_dir" || {
+                echo not_visible
+                return 1
+            }
         done
-    else
-        cert_visible_in_dir "$SYSTEM_CERT_DIR" || return 1
+        echo visible
+        return 0
     fi
-    return 0
+
+    cert_visible_in_dir "$SYSTEM_CERT_DIR" && echo visible && return 0
+    echo not_visible
+    return 1
+}
+
+store_visibility_pid() {
+    pid=$1
+
+    [ -d "/proc/$pid/root" ] || {
+        echo unavailable
+        return 2
+    }
+
+    if [ -d "/proc/$pid/root$APEX_CERT_DIR" ]; then
+        cert_visible_in_pid_dir "$pid" "$APEX_CERT_DIR" && {
+            echo visible
+            return 0
+        }
+        echo not_visible
+        return 1
+    fi
+
+    if [ -d "/proc/$pid/root$SYSTEM_CERT_DIR" ]; then
+        cert_visible_in_pid_dir "$pid" "$SYSTEM_CERT_DIR" && {
+            echo visible
+            return 0
+        }
+        echo not_visible
+        return 1
+    fi
+
+    echo unavailable
+    return 2
+}
+
+verify_visibility() {
+    [ "$(store_visibility_current)" = "visible" ]
+}
+
+package_pids() {
+    pkg=$1
+    pidof "$pkg" 2>/dev/null
+    ps -A 2>/dev/null | awk -v p="$pkg" '
+        NR > 1 {
+            pid = $2
+            if ($1 ~ /^[0-9]+$/) pid = $1
+            name = $NF
+            if (name == p || index(name, p ":") == 1) print pid
+        }
+    '
+}
+
+package_target_sdk() {
+    dumpsys package "$1" 2>/dev/null | sed -n 's/.*targetSdk=\([0-9][0-9]*\).*/\1/p' | head -n 1
+}
+
+package_uid() {
+    dumpsys package "$1" 2>/dev/null | sed -n 's/.*userId=\([0-9][0-9]*\).*/\1/p' | head -n 1
 }

@@ -6,6 +6,7 @@ export MODDIR
 . "$MODDIR/common.sh"
 
 prepare_trust_store || exit 0
+hybrid_mount_register >/dev/null 2>&1 || true
 
 if ! verify_visibility; then
     mount_targets_current_ns

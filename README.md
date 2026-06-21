@@ -66,13 +66,20 @@ you'll have to reboot the device for the new certificate to be copied to the sys
 ## KernelSU and APatch
 
 KernelSU and APatch require a metamodule for module-provided system file mounts.
-Hybrid Mount is the preferred setup for this module. When Hybrid Mount is active,
-the module stages the Conscrypt APEX trust-store mirror inside its module tree and
-uses the post-mount phase to expose it before apps inherit their mount namespaces.
+Hybrid Mount is the preferred setup for this module. The module registers an
+`adguardcert` Hybrid Mount rule for the system and Conscrypt certificate-store
+paths when the Hybrid Mount API is available, and also ships the `magic` marker
+used by Hybrid Mount Nano. When Hybrid Mount is active, the module stages the
+Conscrypt APEX trust-store mirror inside its module tree so the metamodule can
+expose it before apps inherit their mount namespaces.
 
 If a KernelSU profile unmounts modules for a target app, that app may not see the
 module-provided certificate store. Apps that need AdGuard HTTPS filtering must use
 a profile where this module remains mounted.
+
+The module does not rewrite KernelSU profile configuration automatically. Run
+`/data/adb/modules/adguardcert/action.sh doctor <package>` to check whether a
+specific app process can actually see the staged certificate store.
 
 ## Android 17
 
@@ -80,6 +87,10 @@ Android 17 enables Certificate Transparency by default for apps targeting API 37
 Moving AdGuard's Personal CA to the system trust store is still required for apps
 that do not trust user CAs, but it cannot override app-level Certificate
 Transparency policy, certificate pinning, or custom trust managers.
+
+The doctor command reports `ct_relevant=true` for apps targeting API 37 or newer.
+That is a warning that CT can be involved, not proof that CT caused a connection
+failure.
 
 ## Configuration
 
