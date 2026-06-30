@@ -1,7 +1,7 @@
 id=adguardcert
 name=AdGuard Certificate
-version=v2.2.0-beta.4
-versionCode=42
+version=v2.2.0-beta.5
+versionCode=43
 author=AdGuard, Lars Martens
 description=Moves AdGuard's Personal CA certificate from the user store to Android system and Conscrypt trust stores.
 updateJson=https://raw.githubusercontent.com/larsmartens/adguardcert/master/update.json

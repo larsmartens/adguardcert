@@ -25,6 +25,7 @@ export MIN_CERT_COUNT=1
 for dir in "$SYSTEM_CERTS" "$APEX_CERTS"; do
     printf 'stock-root-a\n' > "$dir/11111111.0"
     printf 'stock-root-b\n' > "$dir/22222222.0"
+    printf 'CN=AdGuard Personal Intermediate CA\n' > "$dir/47ec1af8.0"
 done
 
 printf 'CN=AdGuard Personal CA\n' > "$USER_ROOT/0/cacerts-added/0f4ed297.0"
@@ -41,6 +42,7 @@ test -f "$STATE/cacerts/0f4ed297.0"
 
 test ! -f "$MODDIR/system/etc/security/cacerts/47ec1af8.0"
 test ! -f "$MODDIR/apex/com.android.conscrypt/cacerts/47ec1af8.0"
+test ! -f "$STATE/cacerts/47ec1af8.0"
 test ! -f "$MODDIR/system/etc/security/cacerts/deadbeef.0"
 test ! -f "$MODDIR/apex/com.android.conscrypt/cacerts/deadbeef.0"
 

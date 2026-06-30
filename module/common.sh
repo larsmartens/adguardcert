@@ -261,6 +261,8 @@ copy_cert_files() {
     src_dir=$1
     dst_dir=$2
 
+    cp -f "$src_dir"/* "$dst_dir"/ 2>/dev/null && return 0
+
     for cert in "$src_dir"/*; do
         [ -f "$cert" ] || continue
         cp -f "$cert" "$dst_dir/" || return 1
@@ -288,11 +290,8 @@ apply_cert_permissions() {
     chown "$dir_owner" "$dst_dir" 2>/dev/null
     chmod 0755 "$dst_dir" 2>/dev/null
 
-    for cert in "$dst_dir"/*; do
-        [ -f "$cert" ] || continue
-        chown "$file_owner" "$cert" 2>/dev/null
-        chmod 0644 "$cert" 2>/dev/null
-    done
+    chown "$file_owner" "$dst_dir"/* 2>/dev/null || true
+    chmod 0644 "$dst_dir"/* 2>/dev/null || true
 
     if [ "$(getenforce 2>/dev/null)" = "Enforcing" ]; then
         chcon -R "$selinux_context" "$dst_dir" 2>/dev/null || true
@@ -301,13 +300,6 @@ apply_cert_permissions() {
 
 prune_adguard_certs() {
     dst_dir=$1
-
-    for cert in "$dst_dir"/*; do
-        [ -f "$cert" ] || continue
-        if cert_is_personal "$cert" || cert_is_intermediate "$cert"; then
-            rm -f "$cert"
-        fi
-    done
 
     for hash in $PERSONAL_HASHES $INTERMEDIATE_HASHES "$SELECTED_HASH"; do
         [ -n "$hash" ] || continue
