@@ -1,3 +1,10 @@
+# v2.2.0-beta.2
+
+- Extend runtime repair mounts to already-running zygote child namespaces.
+- Remove stale runtime Conscrypt mirror directories after successful staging.
+- Add KernelSU/Hybrid Mount visibility fields to the doctor command.
+- Align fork update metadata with the current beta module version.
+
 # v2.1.1
 
 _Commit titles and messages for `v2.1..v2.1.1`._
@@ -67,4 +74,3 @@ Updated the script to enhance temporary directory management for handling Androi
 - Commit: `769d64b`
 - Author: Lars Martens
 - Date: 2026-03-25
-

@@ -12,6 +12,7 @@ APEX_ROOT=$ROOT/apex
 APEX_CERTS=$APEX_ROOT/com.android.conscrypt/cacerts
 
 mkdir -p "$MODDIR" "$STATE" "$USER_ROOT/0/cacerts-added" "$SYSTEM_CERTS" "$APEX_CERTS"
+mkdir -p "$STATE/cacerts-123-stale"
 
 export MODDIR
 export ADGUARDCERT_STATE_DIR="$STATE"
@@ -45,7 +46,9 @@ test ! -f "$MODDIR/apex/com.android.conscrypt/cacerts/deadbeef.0"
 
 test -f "$MODDIR/system/etc/security/cacerts/11111111.0"
 test -f "$MODDIR/apex/com.android.conscrypt/cacerts/22222222.0"
+test ! -d "$STATE/cacerts-123-stale"
 
 grep -q '^status=ready$' "$STATE/status"
+grep -q '^candidates=1$' "$STATE/status"
 
 echo "staging test passed"

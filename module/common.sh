@@ -9,6 +9,7 @@ STATUS_FILE=$STATE_DIR/status
 CACHE_FILE=$STATE_DIR/cache
 HYBRID_STATUS_FILE=$STATE_DIR/hybrid.status
 RUN_CERT_DIR=$STATE_DIR/cacerts
+STALE_RUN_CERT_PREFIX=$STATE_DIR/cacerts-
 
 DATA_MISC_USER_DIR=${ADGUARDCERT_DATA_MISC_USER_DIR:-/data/misc/user}
 SYSTEM_CERT_DIR=${ADGUARDCERT_SYSTEM_CERT_DIR:-/system/etc/security/cacerts}
@@ -21,6 +22,7 @@ PERSONAL_HASHES=${PERSONAL_HASHES:-"0f4ed297 14944648"}
 INTERMEDIATE_HASHES=${INTERMEDIATE_HASHES:-"47ec1af8"}
 MIN_CERT_COUNT=${MIN_CERT_COUNT:-10}
 HYBRID_MOUNT_CLI=${HYBRID_MOUNT_CLI:-}
+RUNTIME_CHILD_NAMESPACE_MOUNTS=${RUNTIME_CHILD_NAMESPACE_MOUNTS:-1}
 
 [ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
 
@@ -71,6 +73,7 @@ status_write() {
         echo "hash=$SELECTED_HASH"
         echo "sha256=$SELECTED_SIG"
         echo "user=$SELECTED_USER"
+        echo "candidates=$CANDIDATE_COUNT"
         echo "sdk=$(get_sdk)"
         echo "time=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)"
     } > "$STATUS_FILE"
@@ -184,6 +187,13 @@ count_files() {
         count=$((count + 1))
     done
     echo "$count"
+}
+
+remove_stale_runtime_dirs() {
+    for dir in "$STALE_RUN_CERT_PREFIX"*; do
+        [ -d "$dir" ] || continue
+        rm -rf "$dir" 2>/dev/null || true
+    done
 }
 
 dir_signature() {
@@ -355,6 +365,7 @@ prepare_trust_store() {
     cache_sig="$SELECTED_HASH:$SELECTED_SIG:$BASE_SIG"
 
     if [ -f "$CACHE_FILE" ] && [ "$(cat "$CACHE_FILE" 2>/dev/null)" = "$cache_sig" ] && mirrors_ready; then
+        remove_stale_runtime_dirs
         status_write "ready" "cached"
         return 0
     fi
@@ -381,6 +392,7 @@ prepare_trust_store() {
     fi
 
     rm -f "$DATA_MISC_USER_DIR"/*/cacerts-removed/"$SELECTED_HASH".* 2>/dev/null
+    remove_stale_runtime_dirs
     echo "$cache_sig" > "$CACHE_FILE"
     status_write "ready" "staged"
     return 0
@@ -517,6 +529,31 @@ pidof_name() {
     pidof "$1" 2>/dev/null
 }
 
+child_pids_for_parent() {
+    parent=$1
+    ps -A 2>/dev/null | awk -v parent="$parent" '
+        NR > 1 {
+            pid = $2
+            ppid = $3
+            if ($1 ~ /^[0-9]+$/) {
+                pid = $1
+                ppid = $2
+            }
+            if (ppid == parent) print pid
+        }
+    '
+}
+
+zygote_child_pids() {
+    [ "$RUNTIME_CHILD_NAMESPACE_MOUNTS" = "1" ] || return 0
+
+    for name in zygote zygote64 zygote_next webview_zygote; do
+        for pid in $(pidof_name "$name"); do
+            child_pids_for_parent "$pid"
+        done
+    done
+}
+
 target_pids() {
     echo 1
     pidof_name zygote
@@ -524,6 +561,7 @@ target_pids() {
     pidof_name zygote_next
     pidof_name webview_zygote
     pidof_name system_server
+    zygote_child_pids
 }
 
 mount_targets_current_ns() {
@@ -652,4 +690,38 @@ package_target_sdk() {
 
 package_uid() {
     dumpsys package "$1" 2>/dev/null | sed -n 's/.*userId=\([0-9][0-9]*\).*/\1/p' | head -n 1
+}
+
+mountinfo_has_path() {
+    pid=$1
+    path=$2
+    [ -r "/proc/$pid/mountinfo" ] || return 2
+    grep -q " $path " "/proc/$pid/mountinfo" 2>/dev/null
+}
+
+mountinfo_has_hybrid_source() {
+    pid=$1
+    [ -r "/proc/$pid/mountinfo" ] || return 2
+    grep -q '/mnt/hm_' "/proc/$pid/mountinfo" 2>/dev/null
+}
+
+pid_mount_state() {
+    pid=$1
+    path=$2
+    if mountinfo_has_path "$pid" "$path"; then
+        echo mounted
+        return 0
+    fi
+    echo absent
+    return 1
+}
+
+pid_hybrid_state() {
+    pid=$1
+    if mountinfo_has_hybrid_source "$pid"; then
+        echo visible
+        return 0
+    fi
+    echo hidden
+    return 1
 }

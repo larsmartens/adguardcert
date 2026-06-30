@@ -51,6 +51,9 @@ print_runtime_visibility() {
         if [ -n "$pid" ]; then
             echo "${name}_pid=$pid"
             echo "${name}_namespace=$(store_visibility_pid "$pid")"
+            echo "${name}_hybrid_mounts=$(pid_hybrid_state "$pid")"
+            echo "${name}_system_etc_mount=$(pid_mount_state "$pid" /system/etc)"
+            [ -d "/proc/$pid/root$APEX_CERT_DIR" ] && echo "${name}_conscrypt_mount=$(pid_mount_state "$pid" "$APEX_CERT_DIR")"
         else
             echo "${name}_pid=not_running"
             echo "${name}_namespace=not_running"
@@ -156,6 +159,9 @@ run_doctor() {
         app_state=$(store_visibility_pid "$pid")
         echo "pid=$pid"
         echo "app_namespace=$app_state"
+        echo "app_hybrid_mounts=$(pid_hybrid_state "$pid")"
+        echo "app_system_etc_mount=$(pid_mount_state "$pid" /system/etc)"
+        [ -d "/proc/$pid/root$APEX_CERT_DIR" ] && echo "app_conscrypt_mount=$(pid_mount_state "$pid" "$APEX_CERT_DIR")"
     else
         app_state=not_running
         echo "pid=not_running"

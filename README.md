@@ -100,6 +100,7 @@ Advanced users can create `/data/adb/adguardcert/config.sh` to override detectio
 PERSONAL_HASHES="0f4ed297 14944648"
 INTERMEDIATE_HASHES="47ec1af8"
 MIN_CERT_COUNT=10
+RUNTIME_CHILD_NAMESPACE_MOUNTS=1
 ```
 
 The default policy is intentionally narrow: copy AdGuard's Personal CA, keep the
