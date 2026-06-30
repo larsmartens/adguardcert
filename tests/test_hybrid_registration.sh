@@ -39,10 +39,10 @@ export HYBRID_MOUNT_CLI="$CLI"
 hybrid_mount_register
 
 test -f "$MODDIR/magic"
-grep -q 'api config-patch --patch' "$CALLS"
+grep -q 'api config-patch --apply-runtime' "$CALLS"
 grep -q 'system/etc/security/cacerts' "$CALLS"
 grep -q 'apex/com.android.conscrypt/cacerts' "$CALLS"
-grep -q 'api modules-apply --modules \["adguardcert"\]' "$CALLS"
+grep -q 'api modules-apply \["adguardcert"\]' "$CALLS"
 grep -q '^status=registered$' "$STATE/hybrid.status"
 
 echo "hybrid registration test passed"

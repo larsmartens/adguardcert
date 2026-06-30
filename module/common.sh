@@ -465,14 +465,18 @@ hybrid_mount_register() {
     fi
 
     patch=$(hybrid_mount_patch)
-    if "$cli" api config-patch --patch "$patch" --apply-runtime >/dev/null 2>&1; then
-        "$cli" api modules-apply --modules '["adguardcert"]' >/dev/null 2>&1 || true
+    if "$cli" api config-patch --apply-runtime "$patch" >/dev/null 2>&1 || \
+        "$cli" api config-patch --patch "$patch" --apply-runtime >/dev/null 2>&1; then
+        "$cli" api modules-apply '["adguardcert"]' >/dev/null 2>&1 || \
+            "$cli" api modules-apply --modules '["adguardcert"]' >/dev/null 2>&1 || true
         hybrid_status_write "registered" "api-config-patch"
         return 0
     fi
 
-    if "$cli" api config-patch --patch "$patch" >/dev/null 2>&1; then
-        "$cli" api modules-apply --modules '["adguardcert"]' >/dev/null 2>&1 || true
+    if "$cli" api config-patch "$patch" >/dev/null 2>&1 || \
+        "$cli" api config-patch --patch "$patch" >/dev/null 2>&1; then
+        "$cli" api modules-apply '["adguardcert"]' >/dev/null 2>&1 || \
+            "$cli" api modules-apply --modules '["adguardcert"]' >/dev/null 2>&1 || true
         hybrid_status_write "registered" "api-config-patch-deferred"
         return 0
     fi
