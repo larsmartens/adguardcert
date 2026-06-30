@@ -1,9 +1,10 @@
-# v2.2.0-beta.2
+# v2.2.0-beta.3
 
 - Extend runtime repair mounts to already-running zygote child namespaces.
 - Remove stale runtime Conscrypt mirror directories after successful staging.
 - Add KernelSU/Hybrid Mount visibility fields to the doctor command.
 - Align fork update metadata with the current beta module version.
+- Skip stable update metadata rewrites for prerelease tag builds.
 
 # v2.1.1
 
