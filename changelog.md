@@ -1,4 +1,4 @@
-# v2.2.0-beta.6
+# v2.2.0-beta.7
 
 - Extend runtime repair mounts to already-running zygote child namespaces.
 - Remove stale runtime Conscrypt mirror directories after successful staging.
@@ -9,6 +9,7 @@
 - Speed up trust-store staging by bulk-copying CA files and pruning AdGuard certs by hash.
 - Make staging idempotent after the trust stores are already mounted from the module.
 - Report trust-store preparation failures separately from missing AdGuard certificates.
+- Recover from stale/deleted bind mounts by lazily unmounting and retrying namespace binds.
 
 # v2.1.1
 

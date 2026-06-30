@@ -532,7 +532,10 @@ bind_mount_dir() {
 
     [ -d "$src" ] || return 1
     [ -d "$dst" ] || return 0
-    bb mount -o bind "$src" "$dst" 2>/dev/null || return 1
+    bb mount -o bind "$src" "$dst" 2>/dev/null || {
+        bb umount -l "$dst" 2>/dev/null || true
+        bb mount -o bind "$src" "$dst" 2>/dev/null || return 1
+    }
     bb mount -o remount,bind,ro "$dst" 2>/dev/null || true
     return 0
 }
@@ -550,7 +553,10 @@ bind_mount_dir_in_ns() {
     [ -d "$dst" ] || return 0
     [ -r "/proc/$pid/ns/mnt" ] || return 0
     have_nsenter || return 0
-    bb nsenter --mount="/proc/$pid/ns/mnt" -- mount -o bind "$src" "$dst" 2>/dev/null || return 1
+    bb nsenter --mount="/proc/$pid/ns/mnt" -- mount -o bind "$src" "$dst" 2>/dev/null || {
+        bb nsenter --mount="/proc/$pid/ns/mnt" -- umount -l "$dst" 2>/dev/null || true
+        bb nsenter --mount="/proc/$pid/ns/mnt" -- mount -o bind "$src" "$dst" 2>/dev/null || return 1
+    }
     bb nsenter --mount="/proc/$pid/ns/mnt" -- mount -o remount,bind,ro "$dst" 2>/dev/null || true
     return 0
 }
