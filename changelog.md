@@ -1,4 +1,4 @@
-# v2.2.0-beta.5
+# v2.2.0-beta.6
 
 - Extend runtime repair mounts to already-running zygote child namespaces.
 - Remove stale runtime Conscrypt mirror directories after successful staging.
@@ -7,6 +7,8 @@
 - Skip stable update metadata rewrites for prerelease tag builds.
 - Use Hybrid Mount's current positional API with fallback to legacy flags.
 - Speed up trust-store staging by bulk-copying CA files and pruning AdGuard certs by hash.
+- Make staging idempotent after the trust stores are already mounted from the module.
+- Report trust-store preparation failures separately from missing AdGuard certificates.
 
 # v2.1.1
 

@@ -114,10 +114,18 @@ run_doctor() {
     echo "module_id=$MODULE_ID"
 
     if ! prepare_trust_store >/dev/null 2>&1; then
-        echo "adguard_personal_ca=missing"
-        echo "diagnosis=adguard_personal_ca_not_found"
-        echo "recommended_fix=enable_adguard_https_filtering_and_install_its_certificate_to_user_store_then_reboot"
-        return 1
+        if find_adguard_cert >/dev/null 2>&1; then
+            print_cert_details
+            [ -f "$STATUS_FILE" ] && sed 's/^/prepare_/' "$STATUS_FILE"
+            echo "diagnosis=trust_store_prepare_failed"
+            echo "recommended_fix=run_action_sh_repair_or_reboot"
+            return 1
+        else
+            echo "adguard_personal_ca=missing"
+            echo "diagnosis=adguard_personal_ca_not_found"
+            echo "recommended_fix=enable_adguard_https_filtering_and_install_its_certificate_to_user_store_then_reboot"
+            return 1
+        fi
     fi
 
     hybrid_mount_register >/dev/null 2>&1 || true

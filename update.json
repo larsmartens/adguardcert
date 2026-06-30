@@ -1,6 +1,6 @@
 {
-  "version": "v2.2.0-beta.5",
-  "versionCode": 43,
-  "zipUrl": "https://github.com/larsmartens/adguardcert/releases/download/v2.2.0-beta.5/adguardcert-v2.2.0-beta.5.zip",
+  "version": "v2.2.0-beta.6",
+  "versionCode": 44,
+  "zipUrl": "https://github.com/larsmartens/adguardcert/releases/download/v2.2.0-beta.6/adguardcert-v2.2.0-beta.6.zip",
   "changelog": "https://raw.githubusercontent.com/larsmartens/adguardcert/master/changelog.md"
 }

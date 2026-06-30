@@ -322,13 +322,34 @@ build_cert_dir() {
     return 0
 }
 
-mirrors_ready() {
+module_mirrors_ready() {
     [ -f "$MODULE_SYSTEM_CERT_DIR/$SELECTED_HASH.0" ] || return 1
-    [ -f "$RUN_CERT_DIR/$SELECTED_HASH.0" ] || return 1
     if [ -d "$APEX_CERT_DIR" ]; then
         [ -f "$MODULE_APEX_CERT_DIR/$SELECTED_HASH.0" ] || return 1
     fi
     return 0
+}
+
+mirrors_ready() {
+    module_mirrors_ready || return 1
+    [ -f "$RUN_CERT_DIR/$SELECTED_HASH.0" ] || return 1
+    return 0
+}
+
+mountpoint_uses_module_dir() {
+    mountpoint=$1
+    module_fragment="/$MODULE_ID/"
+
+    awk -v mountpoint="$mountpoint" -v module_fragment="$module_fragment" '
+        $5 == mountpoint && index($4, module_fragment) { found = 1 }
+        END { exit found ? 0 : 1 }
+    ' /proc/self/mountinfo 2>/dev/null
+}
+
+store_uses_module_dirs() {
+    mountpoint_uses_module_dir "$SYSTEM_CERT_DIR" && return 0
+    [ -d "$APEX_CERT_DIR" ] && mountpoint_uses_module_dir "$APEX_CERT_DIR" && return 0
+    return 1
 }
 
 prepare_trust_store() {
@@ -355,6 +376,26 @@ prepare_trust_store() {
     fi
     BASE_SIG="$system_source:$system_sig|$APEX_CERT_DIR:$apex_sig"
     cache_sig="$SELECTED_HASH:$SELECTED_SIG:$BASE_SIG"
+
+    if store_uses_module_dirs && module_mirrors_ready; then
+        if [ ! -f "$RUN_CERT_DIR/$SELECTED_HASH.0" ]; then
+            if [ -d "$MODULE_APEX_CERT_DIR" ]; then
+                build_cert_dir "$MODULE_APEX_CERT_DIR" "$RUN_CERT_DIR" || {
+                    status_write "failed" "runtime-store-stage-failed"
+                    return 1
+                }
+            else
+                build_cert_dir "$MODULE_SYSTEM_CERT_DIR" "$RUN_CERT_DIR" || {
+                    status_write "failed" "runtime-store-stage-failed"
+                    return 1
+                }
+            fi
+        fi
+        remove_stale_runtime_dirs
+        echo "$cache_sig" > "$CACHE_FILE"
+        status_write "ready" "cached-mounted"
+        return 0
+    fi
 
     if [ -f "$CACHE_FILE" ] && [ "$(cat "$CACHE_FILE" 2>/dev/null)" = "$cache_sig" ] && mirrors_ready; then
         remove_stale_runtime_dirs
